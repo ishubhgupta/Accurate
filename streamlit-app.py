@@ -96,6 +96,10 @@ def run_model(df, model, model_name):
             # Train mode
             model.fit(X_train, y_train)
 
+            # feature_importances = pd.DataFrame({'Feature': X.columns, 'Importance': model.feature_importances_})
+            # feature_importances = feature_importances.sort_values(by='Importance', ascending=False)
+            # st.write(feature_importances)
+
             # Make predictions
             
             testing_file = st.sidebar.file_uploader("Upload your testing CSV file...", type=['csv'])
