@@ -1,0 +1,115 @@
+version: '3.8'
+
+services:
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: accurate_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-accurate_db}
+      MYSQL_USER: ${MYSQL_USER:-accurate_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-accurate_password}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./infra/mysql-init:/docker-entrypoint-initdb.d
+    networks:
+      - accurate_network
+
+  # Redis for Celery
+  redis:
+    image: redis:7-alpine
+    container_name: accurate_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - accurate_network
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: accurate_backend
+    environment:
+      - DATABASE_URL=mysql+pymysql://${MYSQL_USER:-accurate_user}:${MYSQL_PASSWORD:-accurate_password}@mysql:3306/${MYSQL_DATABASE:-accurate_db}
+      - REDIS_URL=redis://redis:6379/0
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_S3_BUCKET=${AWS_S3_BUCKET:-accurate-ml-bucket}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - SECRET_KEY=${SECRET_KEY:-your-secret-key-here}
+    ports:
+      - "5000:5000"
+    depends_on:
+      - mysql
+      - redis
+    volumes:
+      - ./backend:/app
+    networks:
+      - accurate_network
+
+  # Celery Worker
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: accurate_celery_worker
+    command: celery -A app.tasks worker --loglevel=info
+    environment:
+      - DATABASE_URL=mysql+pymysql://${MYSQL_USER:-accurate_user}:${MYSQL_PASSWORD:-accurate_password}@mysql:3306/${MYSQL_DATABASE:-accurate_db}
+      - REDIS_URL=redis://redis:6379/0
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_S3_BUCKET=${AWS_S3_BUCKET:-accurate-ml-bucket}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+    depends_on:
+      - mysql
+      - redis
+    volumes:
+      - ./backend:/app
+    networks:
+      - accurate_network
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: accurate_frontend
+    environment:
+      - BACKEND_URL=http://backend:5000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - accurate_network
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: accurate_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - accurate_network
+
+volumes:
+  mysql_data:
+  redis_data:
+
+networks:
+  accurate_network:
+    driver: bridge
